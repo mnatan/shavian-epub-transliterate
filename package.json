@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "vitest",
+    "test": "vitest run",
     "postinstall": "node scripts/download-readlex.js"
   },
   "keywords": [],
@@ -17,5 +17,8 @@
     "phonetic": "^0.1.1",
     "sentence-splitter": "^5.0.0",
     "text-to-ipa": "^1.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
   }
 }
