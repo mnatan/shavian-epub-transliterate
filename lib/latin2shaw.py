@@ -43,7 +43,7 @@ class LatinToShavian:
         self.prefixes: dict[str, str] = {
             "anti": "𐑨𐑯𐑑𐑦", "counter": "𐑒𐑬𐑯𐑑𐑼", "de": "𐑛𐑰", "dis": "𐑛𐑦𐑕",
             "esque": "𐑧𐑕𐑒", "hyper": "𐑣𐑲𐑐𐑼", "hypo": "𐑣𐑲𐑐𐑴", "mega": "𐑥𐑧𐑜𐑩",
-            "meta": "𐑥𐑧𐑑𐑩", "micro": "𐑥𐑲𐑒𐑮𐑴", "multi": "��𐑳𐑤𐑑𐑦", "mis": "𐑥𐑦𐑕",
+            "meta": "𐑥𐑧𐑑𐑩", "micro": "𐑥��𐑒𐑮𐑴", "multi": "𐑳𐑤𐑑𐑦", "mis": "𐑥𐑦𐑕",
             "neuro": "𐑯𐑘𐑫𐑼𐑴", "non": "𐑯𐑪𐑯", "o'er": "𐑴𐑼", "out": "𐑬𐑑", "over": "𐑴𐑝𐑼",
             "poly": "𐑐𐑪𐑤𐑦", "post": "𐑐𐑴𐑕𐑑", "pre": "𐑐𐑮𐑰", "pro": "𐑐𐑮𐑴",
             "pseudo": "𐑕𐑿𐑛𐑴", "re": "𐑮𐑰", "sub": "𐑕𐑳𐑚", "super": "𐑕𐑵𐑐𐑼",
@@ -66,9 +66,237 @@ class LatinToShavian:
         # Entity types that get namer dots
         self.namer_dot_ents: set[str] = {"PERSON", "FAC", "ORG", "GPE", "LOC", "PRODUCT", "EVENT", "WORK_OF_ART", "LAW"}
 
+        # Initialize phonetic mapping
+        self._initialize_phonetic_mapping()
+        
         # Initialize spaCy
         self._initialize_spacy()
         
+    def _initialize_phonetic_mapping(self):
+        """Initialize IPA to Shavian phonetic mapping."""
+        # IPA to Shavian mapping based on standard English pronunciation
+        self.ipa_to_shavian = {
+            # Vowels
+            'i': '𐑦', 'ɪ': '𐑦', 'iː': '𐑰', 'e': '𐑧', 'eɪ': '𐑱', 'ɛ': '𐑧', 'æ': '𐑨',
+            'ɑ': '𐑭', 'ɑː': '𐑭', 'ɒ': '𐑪', 'ɔː': '𐑷', 'oʊ': '𐑴', 'ʊ': '𐑫', 'uː': '𐑵',
+            'ʌ': '𐑳', 'ɜː': '𐑻', 'ə': '𐑩', 'ɚ': '𐑼', 'aɪ': '𐑲', 'aʊ': '𐑬', 'ɔɪ': '𐑶',
+            'ɪə': '𐑽', 'eə': '𐑺', 'ʊə': '𐑻',
+            
+            # Consonants
+            'p': '𐑐', 'b': '𐑚', 't': '𐑑', 'd': '𐑛', 'k': '𐑒', 'g': '𐑜', 'f': '𐑓',
+            'v': '𐑝', 'θ': '𐑔', 'ð': '𐑞', 's': '𐑕', 'z': '𐑟', 'ʃ': '𐑖', 'ʒ': '𐑠',
+            'tʃ': '𐑗', 'dʒ': '𐑡', 'm': '𐑥', 'n': '𐑯', 'ŋ': '𐑙', 'l': '𐑤', 'r': '𐑮',
+            'w': '𐑢', 'j': '𐑘', 'h': '𐑣',
+            
+            # Additional mappings for common variations
+            'x': '𐑒',  # Scottish 'ch' as in 'loch'
+            'ʔ': '',    # Glottal stop (often silent)
+        }
+        
+        # Common English letter combinations to IPA patterns
+        self.letter_to_ipa_patterns = {
+            # Vowel patterns (simplified - will be handled contextually)
+            'a': ['æ'],      # Default to 'cat' sound
+            'e': ['e'],      # Default to 'bed' sound  
+            'i': ['ɪ'],      # Default to 'bit' sound
+            'o': ['ɒ'],      # Default to 'lot' sound
+            'u': ['ʊ'],      # Default to 'put' sound
+            'y': ['j'],      # Default to consonant 'y'
+            
+            # Consonant patterns
+            'b': ['b'],
+            'd': ['d'],
+            'f': ['f'],
+            'h': ['h'],
+            'j': ['dʒ'],
+            'k': ['k'],
+            'l': ['l'],
+            'm': ['m'],
+            'n': ['n'],
+            'p': ['p'],
+            'q': ['k'],
+            'r': ['r'],
+            't': ['t'],
+            'v': ['v'],
+            'w': ['w'],
+            'x': ['ks'],
+            'z': ['z'],
+        }
+        
+    def _get_ipa_from_text(self, word: str) -> str:
+        """Convert English text to IPA using phonetic rules."""
+        word = word.lower()
+        ipa = ""
+        i = 0
+        
+        while i < len(word):
+            char = word[i]
+            
+            # Handle common trigraphs first
+            if i < len(word) - 2:
+                trigraph = word[i:i+3]
+                if trigraph in ['tch', 'dge']:
+                    if trigraph == 'tch':
+                        ipa += 'tʃ'
+                    elif trigraph == 'dge':
+                        ipa += 'dʒ'
+                    i += 3
+                    continue
+            
+            # Handle common digraphs
+            if i < len(word) - 1:
+                digraph = word[i:i+2]
+                if digraph in ['th', 'ch', 'sh', 'ph', 'wh', 'qu', 'ng', 'ck', 'gh']:
+                    if digraph == 'th':
+                        # Context-dependent: voiced in function words, unvoiced in content words
+                        if word in ['the', 'this', 'that', 'these', 'those', 'they', 'them', 'their']:
+                            ipa += 'ð'
+                        else:
+                            ipa += 'θ'
+                    elif digraph == 'ch':
+                        ipa += 'tʃ'
+                    elif digraph == 'sh':
+                        ipa += 'ʃ'
+                    elif digraph == 'ph':
+                        ipa += 'f'
+                    elif digraph == 'wh':
+                        ipa += 'w'
+                    elif digraph == 'qu':
+                        ipa += 'kw'
+                    elif digraph == 'ng':
+                        ipa += 'ŋ'
+                    elif digraph == 'ck':
+                        ipa += 'k'
+                    elif digraph == 'gh':
+                        # 'gh' is often silent or 'f' in some words
+                        if i > 0 and word[i-1] in ['au', 'ou']:
+                            ipa += 'f'
+                        else:
+                            # Silent in most cases
+                            pass
+                    i += 2
+                    continue
+            
+            # Handle single characters with context
+            if char == 'c':
+                # 'c' before 'e', 'i', 'y' is 's', otherwise 'k'
+                if i < len(word) - 1 and word[i+1] in ['e', 'i', 'y']:
+                    ipa += 's'
+                else:
+                    ipa += 'k'
+            elif char == 'g':
+                # 'g' before 'e', 'i', 'y' is 'dʒ', otherwise 'g'
+                if i < len(word) - 1 and word[i+1] in ['e', 'i', 'y']:
+                    ipa += 'dʒ'
+                else:
+                    ipa += 'g'
+            elif char == 's':
+                # 's' between vowels is often 'z'
+                if i > 0 and i < len(word) - 1 and word[i-1] in 'aeiou' and word[i+1] in 'aeiou':
+                    ipa += 'z'
+                else:
+                    ipa += 's'
+            elif char in 'aeiou':
+                # Handle vowels with context
+                if char == 'a':
+                    # 'a' patterns: cat, face, father, about
+                    if i < len(word) - 1 and word[i+1] == 'e' and (i == len(word) - 2 or word[i+2] not in 'aeiou'):
+                        ipa += 'eɪ'  # face
+                    elif i < len(word) - 1 and word[i+1] in 'r':
+                        ipa += 'ɑː'  # father
+                    else:
+                        ipa += 'æ'   # cat
+                elif char == 'e':
+                    # 'e' patterns: bed, me, pretty
+                    if i == len(word) - 1:
+                        ipa += 'iː'  # me (final e)
+                    elif i < len(word) - 1 and word[i+1] in 'aeiou':
+                        ipa += 'iː'  # me
+                    else:
+                        ipa += 'e'   # bed
+                elif char == 'i':
+                    # 'i' patterns: bit, bite, machine
+                    if i < len(word) - 1 and word[i+1] == 'e' and (i == len(word) - 2 or word[i+2] not in 'aeiou'):
+                        ipa += 'aɪ'  # bite
+                    elif i == len(word) - 1:
+                        ipa += 'iː'  # machine (final i)
+                    else:
+                        ipa += 'ɪ'   # bit
+                elif char == 'o':
+                    # 'o' patterns: lot, go, love
+                    if i < len(word) - 1 and word[i+1] == 'e' and (i == len(word) - 2 or word[i+2] not in 'aeiou'):
+                        ipa += 'oʊ'  # go
+                    elif i < len(word) - 1 and word[i+1] in 'u':
+                        ipa += 'ʌ'   # love
+                    else:
+                        ipa += 'ɒ'   # lot
+                elif char == 'u':
+                    # 'u' patterns: put, cute, rule
+                    if i < len(word) - 1 and word[i+1] == 'e' and (i == len(word) - 2 or word[i+2] not in 'aeiou'):
+                        ipa += 'juː' # cute
+                    elif i < len(word) - 1 and word[i+1] in 'r':
+                        ipa += 'uː'  # rule
+                    else:
+                        ipa += 'ʊ'   # put
+            elif char == 'y':
+                # 'y' patterns: yes, my, happy
+                if i == 0 or (i > 0 and word[i-1] not in 'aeiou'):
+                    ipa += 'j'   # yes (consonant)
+                elif i == len(word) - 1:
+                    ipa += 'iː'  # happy (final y)
+                else:
+                    ipa += 'ɪ'   # myth
+            elif char in self.letter_to_ipa_patterns:
+                # Use the first pattern as default
+                ipa += self.letter_to_ipa_patterns[char][0]
+            else:
+                # Keep unknown characters as-is
+                ipa += char
+            
+            i += 1
+        
+        return ipa
+    
+    def _ipa_to_shavian(self, ipa: str) -> str:
+        """Convert IPA to Shavian script."""
+        shavian = ""
+        i = 0
+        
+        while i < len(ipa):
+            # Try digraphs first
+            if i < len(ipa) - 1:
+                digraph = ipa[i:i+2]
+                if digraph in self.ipa_to_shavian:
+                    shavian += self.ipa_to_shavian[digraph]
+                    i += 2
+                    continue
+            
+            # Try single characters
+            char = ipa[i]
+            if char in self.ipa_to_shavian:
+                shavian += self.ipa_to_shavian[char]
+            else:
+                # Keep unknown IPA symbols as-is
+                shavian += char
+            
+            i += 1
+        
+        return shavian
+    
+    def _phonetic_transliterate(self, word: str) -> str:
+        """Convert a word to Shavian using phonetic rules."""
+        # Convert to IPA first
+        ipa = self._get_ipa_from_text(word)
+        
+        # Convert IPA to Shavian
+        shavian = self._ipa_to_shavian(ipa)
+        
+        # Add dot for proper nouns (words starting with uppercase)
+        prefix = "·" if word[0].isupper() else ""
+        
+        # Add phonetic warning symbol
+        return prefix + shavian + "🔤"
+
     def _initialize_spacy(self):
         """Initialize spaCy model and custom tokenizer."""
         # Load spaCy, excluding pipeline components that are not required
@@ -254,9 +482,11 @@ class LatinToShavian:
 
                 if found is not False:
                     continue
-                # If there is still no match, do not convert the word
+                
+                # Phonetic fallback: if no match found, try phonetic transliteration
                 if token.text.isalpha():
-                    text_split_shaw += token.text + "✢" + token.whitespace_
+                    phonetic_result = self._phonetic_transliterate(token.text)
+                    text_split_shaw += phonetic_result + token.whitespace_
                 else:
                     text_split_shaw += token.text + token.whitespace_
 

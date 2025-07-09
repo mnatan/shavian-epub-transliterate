@@ -73,9 +73,10 @@ async function transliterateWithQuotes(text) {
     if (currentIndex < text.length) {
         segments.push({ text: text.slice(currentIndex), isQuoted: false });
     }
-    // Transliterate each segment
+    // Transliterate each segment and preserve quotes
     const transliteratedSegments = await Promise.all(segments.map(async segment => {
-        return latin2shaw(segment.text);
+        const transliterated = await latin2shaw(segment.text);
+        return segment.isQuoted ? `"${transliterated}"` : transliterated;
     }));
     return transliteratedSegments.join('');
 }
@@ -85,6 +86,47 @@ async function transliterateHtmlEntities(htmlText) {
         .replace(/&#39;/g, "'")
         .replace(/&apos;/g, "'");
     return latin2shaw(result);
+}
+
+function splitSentencesWithQuotes(text) {
+    // Helper to split quoted content into sentences and re-wrap in quotes
+    function splitQuotedBlock(inner) {
+        // Split on sentence-ending punctuation followed by space or end
+        const sentences = inner.match(/[^.!?]+[.!?]+(?:\s+|$)/g);
+        if (!sentences) return ['"' + inner.trim() + '"'];
+        return sentences.map(s => '"' + s.trim() + '"').filter(s => s.length > 2);
+    }
+
+    const result = [];
+    let cursor = 0;
+    while (cursor < text.length) {
+        const startQuote = text.indexOf('"', cursor);
+        if (startQuote === -1) {
+            // No more quotes, process the rest as non-quoted
+            const nodes = split(text.slice(cursor));
+            result.push(...nodes.filter(node => node.type === 'Sentence').map(node => node.raw.trim()).filter(Boolean));
+            break;
+        }
+        // Process non-quoted prefix
+        if (startQuote > cursor) {
+            const prefix = text.slice(cursor, startQuote);
+            const nodes = split(prefix);
+            result.push(...nodes.filter(node => node.type === 'Sentence').map(node => node.raw.trim()).filter(Boolean));
+        }
+        // Find end quote
+        const endQuote = text.indexOf('"', startQuote + 1);
+        if (endQuote === -1) {
+            // Unmatched quote, treat rest as non-quoted
+            const nodes = split(text.slice(startQuote));
+            result.push(...nodes.filter(node => node.type === 'Sentence').map(node => node.raw.trim()).filter(Boolean));
+            break;
+        }
+        // Process quoted block
+        const quotedInner = text.slice(startQuote + 1, endQuote);
+        result.push(...splitQuotedBlock(quotedInner));
+        cursor = endQuote + 1;
+    }
+    return result.filter(Boolean);
 }
 
 async function transliterateEpub(inputPath, outputPath, includeOriginal = false) {
@@ -120,38 +162,66 @@ async function transliterateEpub(inputPath, outputPath, includeOriginal = false)
                                 return placeholder;
                             });
                             
-                            // Remove other HTML tags, collapse whitespace
+                            // Remove other HTML tags, collapse whitespace, but preserve image placeholders
                             const textContent = processedText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
                             
                             if (textContent.length > 0) {
-                                // Parse the original HTML structure to preserve divs and other elements
-                                const originalHtml = textContent;
-                                const shavianText = await transliterateWithQuotes(textContent);
-                                
-                                // Extract text content for sentence splitting (remove HTML tags)
+                                // Extract text content for sentence splitting (remove HTML tags but keep placeholders)
                                 const textOnly = textContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
                                 
-                                // Split into sentences using the sentence-splitter library
-                                const sentenceNodes = split(textOnly);
-                                const sentences = sentenceNodes
-                                    .filter(node => node.type === 'Sentence')
-                                    .map(node => node.raw.trim())
-                                    .filter(sentence => sentence.length > 0);
+                                // Split text into segments, separating image placeholders from regular text
+                                const segments = [];
+                                let currentText = textOnly;
+                                
+                                // Find and extract image placeholders
+                                imagePlaceholders.forEach(({ placeholder }) => {
+                                    const parts = currentText.split(placeholder);
+                                    if (parts.length > 1) {
+                                        // Add text before placeholder
+                                        if (parts[0].trim()) {
+                                            segments.push({ type: 'text', content: parts[0].trim() });
+                                        }
+                                        // Add placeholder
+                                        segments.push({ type: 'image', placeholder });
+                                        // Update current text to remaining parts
+                                        currentText = parts.slice(1).join(placeholder);
+                                    }
+                                });
+                                
+                                // Add any remaining text
+                                if (currentText.trim()) {
+                                    segments.push({ type: 'text', content: currentText.trim() });
+                                }
                                 
                                 // Create paragraph pairs (Shavian + Original if enabled)
                                 const paragraphPairs = [];
-                                for (let j = 0; j < sentences.length; j++) {
-                                    const originalSentence = sentences[j];
-                                    const shavianSentence = await transliterateWithQuotes(originalSentence);
-                                    
-                                    // Escape HTML for Shavian text
-                                    const escaped = escapeHtml(shavianSentence);
-                                    paragraphPairs.push(`<p class="calibre2">${escaped}</p>`);
-                                    
-                                    // Add original text if enabled
-                                    if (includeOriginal) {
-                                        const escapedOriginal = escapeHtml(originalSentence);
-                                        paragraphPairs.push(`<p class="original-text">${escapedOriginal}</p>`);
+                                for (const segment of segments) {
+                                    if (segment.type === 'image') {
+                                        // Handle image placeholder - don't transliterate, just preserve
+                                        paragraphPairs.push(`<p class="calibre2">${segment.placeholder}</p>`);
+                                        
+                                        // Add original text if enabled
+                                        if (includeOriginal) {
+                                            const escapedOriginal = escapeHtml(segment.placeholder);
+                                            paragraphPairs.push(`<p class="original-text">${escapedOriginal}</p>`);
+                                        }
+                                    } else {
+                                        // Normal text - split into sentences and transliterate
+                                        const sentences = splitSentencesWithQuotes(segment.content);
+                                        
+                                        for (const sentence of sentences) {
+                                            const shavianSentence = await transliterateWithQuotes(sentence);
+                                            
+                                            // Escape HTML for Shavian text
+                                            const escaped = escapeHtml(shavianSentence);
+                                            paragraphPairs.push(`<p class="calibre2">${escaped}</p>`);
+                                            
+                                            // Add original text if enabled
+                                            if (includeOriginal) {
+                                                const escapedOriginal = escapeHtml(sentence);
+                                                paragraphPairs.push(`<p class="original-text">${escapedOriginal}</p>`);
+                                            }
+                                        }
                                     }
                                 }
                                 
@@ -163,14 +233,12 @@ async function transliterateEpub(inputPath, outputPath, includeOriginal = false)
                                 // Add images back to the content
                                 let finalContent = `<h1 id=\"${chapterId}\">${escapeHtml(chapter.title || `Chapter ${i + 1}`)}</h1>\n<p class=\"calibre5\"></p>\n${paragraphs}`;
                                 
-                                // Insert images at appropriate positions (after paragraphs)
-                                if (imagePlaceholders.length > 0) {
-                                    finalContent += '\n';
-                                    imagePlaceholders.forEach(({ placeholder, src }) => {
-                                        const fileName = path.basename(src);
-                                        finalContent += `<p class=\"calibre5\"><img src=\"images/${fileName}\" alt=\"Image\" style=\"max-width: 100%; height: auto;\"/></p>\n`;
-                                    });
-                                }
+                                // Replace image placeholders with actual image tags
+                                imagePlaceholders.forEach(({ placeholder, src }) => {
+                                    const fileName = path.basename(src);
+                                    const imageTag = `<p class="calibre5"><img src="images/${fileName}" alt="Image" style="max-width: 100%; height: auto;"/></p>`;
+                                    finalContent = finalContent.replace(placeholder, imageTag);
+                                });
                                 
                                 chapters.push({
                                     title: chapter.title || `Chapter ${i + 1}`,
