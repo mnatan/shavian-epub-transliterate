@@ -5,8 +5,10 @@ A Node.js tool that transliterates English text in EPUB files to the Shavian alp
 ## Features
 
 - **Phonetic transliteration**: Converts English text to Shavian using phonetic mapping
-- **Cover preservation**: Extracts and includes the original book cover
+- **Image preservation**: Extracts and preserves all images from the original EPUB
+- **Cover preservation**: Automatically detects and includes the original book cover
 - **Multiple output formats**: Generates HTML, EPUB, and MOBI files
+- **Kindle-compatible navigation**: Uses proper HTML structure for native Kindle TOC and navigation
 - **Metadata preservation**: Keeps title, author, and chapter names in Latin script for compatibility
 - **Contraction handling**: Properly transliterates English contractions
 
@@ -52,10 +54,11 @@ node transliterate.js
 ### Output
 
 For each EPUB file, the script generates:
-- `output/[filename]-shavian.html` - HTML version
-- `output/[filename]-shavian.epub` - EPUB version with cover
-- `output/[filename]-shavian.mobi` - MOBI version with cover
+- `output/[filename]-shavian.html` - HTML version with images
+- `output/[filename]-shavian.epub` - EPUB version with cover and images
+- `output/[filename]-shavian.mobi` - MOBI version with cover and images
 - `output/cover.jpg` - Extracted cover image
+- `output/images/` - Directory containing all extracted images
 
 ## Project Structure
 
@@ -69,6 +72,8 @@ shavian/
 │   ├── *.epub               # EPUB output
 │   ├── *.mobi               # MOBI output
 │   ├── cover.jpg            # Extracted cover
+│   ├── images/              # Extracted images
+│   │   └── *.jpg/png/gif    # All images from EPUB
 │   └── .gitkeep             # Git tracking
 ├── transliterate.js          # Main script
 ├── package.json             # Dependencies
@@ -77,11 +82,12 @@ shavian/
 
 ## How It Works
 
-1. **Extract cover**: Finds and extracts the original book cover
+1. **Extract images**: Finds and extracts all images from the EPUB, including the cover
 2. **Parse EPUB**: Reads all chapters and metadata
 3. **Transliterate text**: Converts English text to Shavian using phonetic mapping
-4. **Preserve metadata**: Keeps titles and navigation in Latin script
-5. **Generate output**: Creates HTML, EPUB, and MOBI files with cover
+4. **Preserve images**: Maintains all illustrations and diagrams in the output
+5. **Generate navigation**: Creates proper HTML structure for Kindle TOC and navigation
+6. **Generate output**: Creates HTML, EPUB, and MOBI files with cover and images
 
 ## Transliteration Details
 
@@ -118,7 +124,8 @@ const outputFile = 'output/your-custom-name.html';
 - For other systems, update the path in the script
 
 ### Cover Not Extracted
-- The script tries `calibre_raster_cover.jpg` first, then `cover.jpeg`
+- The script automatically detects and extracts cover images
+- It tries multiple common cover filenames and locations
 - Check that your EPUB contains a cover image
 
 ### Transliteration Issues
@@ -146,4 +153,5 @@ This project is open source. Feel free to modify and distribute.
 
 - The script preserves chapter titles and metadata in Latin script for Kindle compatibility
 - Generated files are placed in the `output/` folder
-- Cover images are automatically extracted from the original EPUB 
+- All images (including cover) are automatically extracted from the original EPUB
+- The output uses Kindle-compatible HTML structure for proper navigation and TOC 

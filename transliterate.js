@@ -299,22 +299,54 @@ async function transliterateEpub(inputPath, outputPath) {
                                 console.error(`Error extracting chapter ${i + 1}:`, err);
                                 return res();
                             }
-                            // Remove HTML tags, collapse whitespace
-                            const textContent = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                            // Process HTML content to preserve images and transliterate text
+                            let processedText = text;
+                            
+                            // Preserve image tags by temporarily replacing them
+                            const imagePlaceholders = [];
+                            let imageIndex = 0;
+                            processedText = processedText.replace(/<img[^>]*src="([^"]*)"[^>]*>/gi, (match, src) => {
+                                const placeholder = `__IMAGE_PLACEHOLDER_${imageIndex}__`;
+                                imagePlaceholders.push({ placeholder, src });
+                                imageIndex++;
+                                return placeholder;
+                            });
+                            
+                            // Remove other HTML tags, collapse whitespace
+                            const textContent = processedText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                            
                             if (textContent.length > 0) {
                                 const shavianText = transliterateWithQuotes(textContent);
+                                
                                 // Split into paragraphs by double newlines or periods (as fallback)
                                 const paragraphs = shavianText.split(/\n\s*\n|(?<=\.) /g)
                                     .map(p => {
                                         // First handle HTML entities, then escape HTML
                                         const withEntities = transliterateHtmlEntities(p.trim());
                                         const escaped = escapeHtml(withEntities);
-                                        return `<p>${escaped}</p>`;
+                                        return `<p class=\"calibre3\">${escaped}</p>`;
                                     })
                                     .join('\n');
+                                
+                                // Generate unique ID for chapter
+                                const chapterId = `chapter-${i + 1}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                                
+                                // Add images back to the content
+                                let finalContent = `<h1 id=\"${chapterId}\">${escapeHtml(chapter.title || `Chapter ${i + 1}`)}</h1>\n<p class=\"calibre5\"></p>\n${paragraphs}`;
+                                
+                                // Insert images at appropriate positions (after paragraphs)
+                                if (imagePlaceholders.length > 0) {
+                                    finalContent += '\n';
+                                    imagePlaceholders.forEach(({ placeholder, src }) => {
+                                        const fileName = path.basename(src);
+                                        finalContent += `<p class=\"calibre5\"><img src=\"images/${fileName}\" alt=\"Image\" style=\"max-width: 100%; height: auto;\"/></p>\n`;
+                                    });
+                                }
+                                
                                 chapters.push({
                                     title: chapter.title || `Chapter ${i + 1}`,
-                                    content: `<h1>${escapeHtml(chapter.title || `Chapter ${i + 1}`)}</h1>\n${paragraphs}`
+                                    id: chapterId,
+                                    content: finalContent
                                 });
                             }
                             res();
@@ -326,21 +358,59 @@ async function transliterateEpub(inputPath, outputPath) {
                     console.error('No chapters with content found.');
                     return reject(new Error('No chapters with content found.'));
                 }
-                // Generate HTML file
-                const htmlContent = `<!DOCTYPE html>
-<html>
+                // Generate HTML file with Kindle-compatible structure
+                const htmlContent = `<?xml version='1.0' encoding='utf-8'?>
+<html xmlns=\"http://www.w3.org/1999/xhtml\">
 <head>
-    <meta charset="utf-8">
     <title>Shavian: ${escapeHtml(epub.metadata.title || 'Transliterated Book')}</title>
+    <meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-        h1 { color: #333; border-bottom: 2px solid #333; padding-bottom: 10px; }
-        p { margin-bottom: 1em; text-align: justify; }
+        .calibre {
+            display: block;
+            font-size: 1em;
+            padding-left: 0;
+            padding-right: 0;
+            text-align: justify;
+            margin: 0 5pt;
+        }
+        .calibre1 {
+            background-color: white;
+            color: black;
+            display: block;
+            font-size: 2em;
+            font-style: normal;
+            font-weight: bold;
+            line-height: 1.2;
+            text-align: center;
+            width: 100%;
+            margin: 0.67em 0 8px;
+        }
+        .calibre3 {
+            display: block;
+            text-align: justify;
+            text-indent: 1em;
+            margin: 0;
+        }
+        .calibre4 {
+            font-weight: bold;
+        }
+        .calibre5 {
+            display: block;
+            text-align: justify;
+            text-indent: 1em;
+            margin: 0 0 1em;
+        }
+        .calibre6 {
+            font-style: italic;
+        }
     </style>
 </head>
-<body>
-    <h1>Shavian: ${escapeHtml(epub.metadata.title || 'Transliterated Book')}</h1>
-    <p><em>By ${escapeHtml(epub.metadata.creator || 'Unknown Author')}</em></p>
+<body class=\"calibre\">
+    <p class=\"calibre1\"> <b class=\"calibre4\">Shavian: ${escapeHtml(epub.metadata.title || 'Transliterated Book')}</b> </p>
+    <p class=\"calibre5\"></p>
+    <p class=\"calibre3\"> <i class=\"calibre6\">By ${escapeHtml(epub.metadata.creator || 'Unknown Author')}</i> </p>
+    <p class=\"calibre5\"></p>
+    <!-- Chapter Content -->
     ${chapters.map(chapter => chapter.content).join('\n')}
 </body>
 </html>`;
@@ -355,25 +425,109 @@ async function transliterateEpub(inputPath, outputPath) {
     });
 }
 
-// Extract cover image manually from EPUB using unzip
-function extractCoverManually(inputFile, callback) {
+// Extract all images from EPUB and preserve them
+function extractAllImages(inputFile, callback) {
     const { exec } = require('child_process');
-    exec(`unzip -p "${inputFile}" calibre_raster_cover.jpg > output/cover.jpg`, (error, stdout, stderr) => {
+    const fs = require('fs');
+    
+    // Create images directory if it doesn't exist
+    const imagesDir = 'output/images';
+    if (!fs.existsSync(imagesDir)) {
+        fs.mkdirSync(imagesDir, { recursive: true });
+    }
+    
+    // First, list all files in the EPUB to find images
+    exec(`unzip -l "${inputFile}"`, (error, stdout, stderr) => {
         if (error) {
-            log('📷 calibre_raster_cover.jpg not found, trying cover.jpeg...', 'yellow');
-            exec(`unzip -p "${inputFile}" cover.jpeg > output/cover.jpg`, (error2, stdout2, stderr2) => {
-                if (error2) {
-                    log('⚠️  No cover image found in EPUB', 'yellow');
-                    callback(false);
-                } else {
-                    log('✅ Cover image extracted: cover.jpg', 'green');
-                    callback('output/cover.jpg');
-                }
-            });
-        } else {
-            log('✅ Cover image extracted: cover.jpg', 'green');
-            callback('output/cover.jpg');
+            log('⚠️  Could not read EPUB contents', 'yellow');
+            callback(false);
+            return;
         }
+        
+        // Find all image files in the EPUB
+        const imageFiles = [];
+        const lines = stdout.split('\n');
+        const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg'];
+        
+        for (const line of lines) {
+            const match = line.match(/\s+(\d+)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+(.+)$/);
+            if (match) {
+                const fileName = match[2].trim();
+                const ext = path.extname(fileName).toLowerCase();
+                if (imageExtensions.includes(ext)) {
+                    imageFiles.push(fileName);
+                }
+            }
+        }
+        
+        if (imageFiles.length === 0) {
+            log('⚠️  No images found in EPUB', 'yellow');
+            // Still try to extract common cover files even if not detected as images
+            const coverAttempts = [
+                'calibre_raster_cover.jpg',
+                'cover.jpeg',
+                'cover.jpg',
+                'OEBPS/cover.jpg',
+                'OEBPS/cover.jpeg',
+                'OEBPS/calibre_raster_cover.jpg'
+            ];
+            
+            function tryCover(attempts, index) {
+                if (index >= attempts.length) {
+                    callback(false);
+                    return;
+                }
+                
+                const coverFile = attempts[index];
+                exec(`unzip -p "${inputFile}" "${coverFile}" > output/cover.jpg 2>/dev/null`, (error, stdout, stderr) => {
+                    if (error) {
+                        tryCover(attempts, index + 1);
+                    } else {
+                        log(`✅ Cover image extracted: ${coverFile}`, 'green');
+                        callback('output/cover.jpg');
+                    }
+                });
+            }
+            
+            tryCover(coverAttempts, 0);
+            return;
+        }
+        
+        log(`📷 Found ${imageFiles.length} image(s) in EPUB`, 'cyan');
+        
+        // Extract all images
+        let extractedCount = 0;
+        let coverFile = null;
+        
+        function extractNext(index) {
+            if (index >= imageFiles.length) {
+                log(`✅ Extracted ${extractedCount} image(s) to ${imagesDir}/`, 'green');
+                callback(coverFile || false);
+                return;
+            }
+            
+            const imageFile = imageFiles[index];
+            const fileName = path.basename(imageFile);
+            const outputPath = path.join(imagesDir, fileName);
+            
+            exec(`unzip -p "${inputFile}" "${imageFile}" > "${outputPath}" 2>/dev/null`, (error, stdout, stderr) => {
+                if (!error) {
+                    extractedCount++;
+                    log(`📷 Extracted: ${fileName}`, 'cyan');
+                    
+                    // Check if this might be the cover
+                    const lowerFileName = fileName.toLowerCase();
+                    if (!coverFile && (lowerFileName.includes('cover') || lowerFileName.includes('calibre_raster'))) {
+                        coverFile = outputPath;
+                        log(`📷 Using as cover: ${fileName}`, 'green');
+                    }
+                }
+                
+                extractNext(index + 1);
+            });
+        }
+        
+        extractNext(0);
     });
 }
 
@@ -386,22 +540,29 @@ async function processEpubFile(inputFile) {
     log(`📚 Title: ${await getEpubMetadata(inputFile, 'title') || 'Unknown'}`, 'cyan');
     
     try {
-        // Extract cover first
+        // Extract all images first
         const coverFile = await new Promise((resolve) => {
-            extractCoverManually(inputFile, (coverFile) => {
+            extractAllImages(inputFile, (coverFile) => {
                 resolve(coverFile);
             });
         });
+        
+        // If no cover found in EPUB, try to use the extracted cover.jpg if it exists
+        let finalCoverFile = coverFile;
+        if (!coverFile && fs.existsSync('output/cover.jpg')) {
+            finalCoverFile = 'output/cover.jpg';
+            log('📷 Using previously extracted cover.jpg', 'cyan');
+        }
         
         // Process the EPUB
         await transliterateEpub(inputFile, outputFile);
         
         // Convert to EPUB and MOBI with cover
         log('🔄 Converting to EPUB...', 'blue');
-        await convertToEpub(outputFile, `output/${fileName}-shavian.epub`, coverFile);
+        await convertToEpub(outputFile, `output/${fileName}-shavian.epub`, finalCoverFile);
         
         log('🔄 Converting to MOBI...', 'blue');
-        await convertToMobi(`output/${fileName}-shavian.epub`, `output/${fileName}-shavian.mobi`, coverFile);
+        await convertToMobi(`output/${fileName}-shavian.epub`, `output/${fileName}-shavian.mobi`, finalCoverFile);
         
         log(`✅ Successfully processed: ${path.basename(inputFile)}`, 'green');
         return true;
@@ -470,6 +631,9 @@ function convertToEpub(htmlFile, epubFile, coverFile) {
         const { exec } = require('child_process');
         let command = `${EBOOK_CONVERT} "${htmlFile}" "${epubFile}"`;
         
+        // Add EPUB-specific options for better compatibility
+        command += ` --output-profile kindle --insert-metadata`;
+        
         // Add cover if available
         if (coverFile && fs.existsSync(coverFile)) {
             command += ` --cover "${coverFile}"`;
@@ -495,6 +659,9 @@ function convertToMobi(epubFile, mobiFile, coverFile) {
     return new Promise((resolve, reject) => {
         const { exec } = require('child_process');
         let command = `${EBOOK_CONVERT} "${epubFile}" "${mobiFile}"`;
+        
+        // Add Kindle-specific options for better compatibility
+        command += ` --mobi-file-type both --output-profile kindle --insert-metadata`;
         
         // Add cover if available
         if (coverFile && fs.existsSync(coverFile)) {
