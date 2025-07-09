@@ -14,6 +14,7 @@
     "epub-gen": "^0.1.0",
     "epub2": "^3.0.2",
     "phonetic": "^0.1.1",
+    "sentence-splitter": "^5.0.0",
     "text-to-ipa": "^1.0.0",
     "to-shavian": "^0.3.1"
   }

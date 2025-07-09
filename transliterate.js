@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const EPub = require('epub');
 const toShavian = require('to-shavian');
+const { split } = require('sentence-splitter');
 
 // ANSI color codes for nicer output
 const colors = {
@@ -94,20 +95,20 @@ const contractionMappings = {
     'they\'ll': '𐑞𐑱𐑤',
     'they\'d': '𐑞𐑱𐑛',
     'don\'t': '𐑛𐑴𐑯𐑑',
-    'doesn\'t': '𐑛𐑳𐑟𐑩𐑯1',
-    'didn\'t': '𐑛𐑦𐑛𐑩𐑯1',
-    'won\'t': '𐑢𐑴𐑯1',
-    'can\'t': '𐑒𐑨𐑯1',
-    'couldn\'t': '𐑒𐑵𐑛𐑩𐑯1',
-    'shouldn\'t': '𐑖𐑵𐑛𐑩𐑯1',
-    'wouldn\'t': '𐑢𐑵𐑛𐑩𐑯1',
-    'isn\'t': '𐑦𐑟𐑩𐑯1',
-    'aren\'t': '𐑸𐑯1',
-    'wasn\'t': '𐑢𐑪𐑟𐑩𐑯1',
-    'weren\'t': '𐑢𐑻𐑯1',
-    'hasn\'t': '𐑣𐑨𐑟𐑩𐑯1',
-    'haven\'t': '𐑣𐑨𐑝𐑩𐑯1',
-    'hadn\'t': '𐑣𐑨𐑛𐑩𐑯1'
+    'doesn\'t': '𐑛𐑳𐑟𐑩𐑯𐑑',
+    'didn\'t': '𐑛𐑦𐑛𐑩𐑯𐑑',
+    'won\'t': '𐑢𐑴𐑯𐑑',
+    'can\'t': '𐑒𐑨𐑯𐑑',
+    'couldn\'t': '𐑒𐑵𐑛𐑩𐑯𐑑',
+    'shouldn\'t': '𐑖𐑵𐑛𐑩𐑯𐑑',
+    'wouldn\'t': '𐑢𐑵𐑛𐑩𐑯𐑑',
+    'isn\'t': '𐑦𐑟𐑩𐑯𐑑',
+    'aren\'t': '𐑸𐑯𐑑',
+    'wasn\'t': '𐑢𐑪𐑟𐑩𐑯𐑑',
+    'weren\'t': '𐑢𐑻𐑯𐑑',
+    'hasn\'t': '𐑣𐑨𐑟𐑩𐑯𐑑',
+    'haven\'t': '𐑣𐑨𐑝𐑩𐑯𐑑',
+    'hadn\'t': '𐑣𐑨𐑛𐑩𐑯𐑑'
 };
 
 function englishToShavianPhonetic(word) {
@@ -332,25 +333,33 @@ async function transliterateEpub(inputPath, outputPath, includeOriginal = false)
                             const textContent = processedText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
                             
                             if (textContent.length > 0) {
+                                // Parse the original HTML structure to preserve divs and other elements
+                                const originalHtml = textContent;
                                 const shavianText = transliterateWithQuotes(textContent);
                                 
-                                // Split into paragraphs by double newlines or periods (as fallback)
-                                const originalParagraphs = textContent.split(/\n\s*\n|(?<=\.) /g).map(p => p.trim()).filter(p => p.length > 0);
-                                const shavianParagraphs = shavianText.split(/\n\s*\n|(?<=\.) /g).map(p => p.trim()).filter(p => p.length > 0);
+                                // Extract text content for sentence splitting (remove HTML tags)
+                                const textOnly = textContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                                
+                                // Split into sentences using the sentence-splitter library
+                                const sentenceNodes = split(textOnly);
+                                const sentences = sentenceNodes
+                                    .filter(node => node.type === 'Sentence')
+                                    .map(node => node.raw.trim())
+                                    .filter(sentence => sentence.length > 0);
                                 
                                 // Create paragraph pairs (Shavian + Original if enabled)
                                 const paragraphPairs = [];
-                                for (let j = 0; j < shavianParagraphs.length; j++) {
-                                    const shavianPara = shavianParagraphs[j];
-                                    const originalPara = j < originalParagraphs.length ? originalParagraphs[j] : '';
+                                for (let j = 0; j < sentences.length; j++) {
+                                    const originalSentence = sentences[j];
+                                    const shavianSentence = transliterateWithQuotes(originalSentence);
                                     
-                                    // Escape HTML for Shavian text (HTML entities already handled in transliteration)
-                                    const escaped = escapeHtml(shavianPara);
-                                    paragraphPairs.push(`<p class="calibre3">${escaped}</p>`);
+                                    // Escape HTML for Shavian text
+                                    const escaped = escapeHtml(shavianSentence);
+                                    paragraphPairs.push(`<p class="calibre2">${escaped}</p>`);
                                     
-                                    // Add original text if enabled and available
-                                    if (includeOriginal && originalPara) {
-                                        const escapedOriginal = escapeHtml(originalPara);
+                                    // Add original text if enabled
+                                    if (includeOriginal) {
+                                        const escapedOriginal = escapeHtml(originalSentence);
                                         paragraphPairs.push(`<p class="original-text">${escapedOriginal}</p>`);
                                     }
                                 }
