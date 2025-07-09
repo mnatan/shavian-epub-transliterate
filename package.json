@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "node scripts/download-readlex.js"
   },
   "keywords": [],
   "author": "",
@@ -15,7 +16,6 @@
     "epub2": "^3.0.2",
     "phonetic": "^0.1.1",
     "sentence-splitter": "^5.0.0",
-    "text-to-ipa": "^1.0.0",
-    "to-shavian": "^0.3.1"
+    "text-to-ipa": "^1.0.0"
   }
 }

@@ -44,3 +44,6 @@ yarn-error.log*
 # Temporary files
 *.tmp
 *.temp
+readlex/
+__pycache__/
+*.pyc

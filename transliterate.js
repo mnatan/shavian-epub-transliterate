@@ -1,8 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const EPub = require('epub');
-const toShavian = require('to-shavian');
 const { split } = require('sentence-splitter');
+const { latin2shaw, closePythonProcess } = require('./lib/latin2shaw-wrapper');
 
 // ANSI color codes for nicer output
 const colors = {
@@ -20,12 +20,12 @@ function log(message, color = 'reset') {
     console.log(`${colors[color]}${message}${colors.reset}`);
 }
 
-function logProgress(current, total, message) {
-    const percentage = Math.round((current / total) * 100);
-    const barLength = 20;
-    const filledLength = Math.round((barLength * current) / total);
-    const bar = '█'.repeat(filledLength) + '░'.repeat(barLength - filledLength);
-    process.stdout.write(`\r${colors.cyan}[${bar}] ${percentage}% - ${message}${colors.reset}`);
+function renderProgressBar(current, total, width = 40) {
+    const percent = current / total;
+    const filled = Math.round(percent * width);
+    const bar = '█'.repeat(filled) + '-'.repeat(width - filled);
+    process.stdout.write(`\r[${bar}] ${current}/${total} (${Math.round(percent * 100)}%)`);
+    if (current === total) process.stdout.write('\n');
 }
 
 function escapeHtml(text) {
@@ -36,167 +36,12 @@ function escapeHtml(text) {
                .replace(/'/g, '&#39;');
 }
 
-// English to Shavian phonetic mapping for fallback
-const englishToShavian = {
-    // Vowels
-    'a': '𐑨', 'e': '𐑧', 'i': '𐑦', 'o': '𐑭', 'u': '𐑳',
-    'ay': '𐑱', 'ai': '𐑱', 'ee': '𐑰', 'oo': '𐑵', 'ow': '𐑶',
-    'oy': '𐑶', 'ar': '𐑸', 'er': '𐑻', 'ir': '𐑻', 'or': '𐑹',
-    'ur': '𐑻', 'aw': '𐑷', 'ew': '𐑵', 'ue': '𐑵',
-    
-    // Consonants
-    'b': '𐑚', 'c': '𐑒', 'd': '𐑛', 'f': '𐑓', 'g': '𐑜',
-    'h': '𐑣', 'j': '𐑡', 'k': '𐑒', 'l': '𐑤', 'm': '𐑥',
-    'n': '𐑯', 'p': '𐑐', 'q': '𐑒', 'r': '𐑮', 's': '𐑕',
-    't': '𐑑', 'v': '𐑝', 'w': '𐑢', 'x': '𐑒𐑕', 'y': '𐑘',
-    'z': '𐑟',
-    
-    // Common combinations
-    'ch': '𐑗', 'sh': '𐑖', 'th': '𐑔', 'ph': '𐑓',
-    'wh': '𐑣𐑢', 'qu': '𐑒𐑢', 'ng': '𐑙', 'ck': '𐑒',
-    'gh': '𐑓', 'kn': '𐑯', 'wr': '𐑮', 'mb': '𐑥',
-    'gn': '𐑯', 'ps': '𐑕', 'rh': '𐑮', 'sc': '𐑕',
-    'dg': '𐑡', 'tch': '𐑗',
-    
-    // Additional combinations for problematic words
-    'mc': '𐑥𐑒', 'mg': '𐑥𐑜', 'gg': '𐑜', 'll': '𐑤',
-    'ss': '𐑕', 'tt': '𐑑', 'pp': '𐑐', 'bb': '𐑚',
-    'dd': '𐑛', 'ff': '𐑓', 'mm': '𐑥', 'nn': '𐑯',
-    'rr': '𐑮', 'cc': '𐑒', 'kk': '𐑒'
-};
-
-// No specific mappings - using phonetic transliteration for all words
-
-// Contraction mappings
-const contractionMappings = {
-    'you\'ve': '𐑿𐑝',
-    'you\'re': '𐑿𐑼',
-    'you\'ll': '𐑿𐑤',
-    'you\'d': '𐑿𐑛',
-    'I\'ve': '𐑲𐑝',
-    'I\'m': '𐑲𐑥',
-    'I\'ll': '𐑲𐑤',
-    'I\'d': '𐑲𐑛',
-    'he\'s': '𐑣𐑰𐑟',
-    'he\'ll': '𐑣𐑰𐑤',
-    'he\'d': '𐑣𐑰𐑛',
-    'she\'s': '𐑖𐑰𐑟',
-    'she\'ll': '𐑖𐑰𐑤',
-    'she\'d': '𐑖𐑰𐑛',
-    'it\'s': '𐑦𐑑𐑕',
-    'it\'ll': '𐑦𐑑𐑤',
-    'it\'d': '𐑦𐑑𐑛',
-    'we\'ve': '𐑢𐑰𐑝',
-    'we\'re': '𐑢𐑰𐑼',
-    'we\'ll': '𐑢𐑰𐑤',
-    'we\'d': '𐑢𐑰𐑛',
-    'they\'ve': '𐑞𐑱𐑝',
-    'they\'re': '𐑞𐑱𐑼',
-    'they\'ll': '𐑞𐑱𐑤',
-    'they\'d': '𐑞𐑱𐑛',
-    'don\'t': '𐑛𐑴𐑯𐑑',
-    'doesn\'t': '𐑛𐑳𐑟𐑩𐑯𐑑',
-    'didn\'t': '𐑛𐑦𐑛𐑩𐑯𐑑',
-    'won\'t': '𐑢𐑴𐑯𐑑',
-    'can\'t': '𐑒𐑨𐑯𐑑',
-    'couldn\'t': '𐑒𐑵𐑛𐑩𐑯𐑑',
-    'shouldn\'t': '𐑖𐑵𐑛𐑩𐑯𐑑',
-    'wouldn\'t': '𐑢𐑵𐑛𐑩𐑯𐑑',
-    'isn\'t': '𐑦𐑟𐑩𐑯𐑑',
-    'aren\'t': '𐑸𐑯𐑑',
-    'wasn\'t': '𐑢𐑪𐑟𐑩𐑯𐑑',
-    'weren\'t': '𐑢𐑻𐑯𐑑',
-    'hasn\'t': '𐑣𐑨𐑟𐑩𐑯𐑑',
-    'haven\'t': '𐑣𐑨𐑝𐑩𐑯𐑑',
-    'hadn\'t': '𐑣𐑨𐑛𐑩𐑯𐑑'
-};
-
-function englishToShavianPhonetic(word) {
-    word = word.toLowerCase();
-    let result = '';
-    let i = 0;
-    
-    while (i < word.length) {
-        let matched = false;
-        
-        // Try 3-character combinations first
-        if (i < word.length - 2) {
-            const threeChar = word.slice(i, i + 3);
-            if (englishToShavian[threeChar]) {
-                result += englishToShavian[threeChar];
-                i += 3;
-                matched = true;
-            }
-        }
-        
-        // Try 2-character combinations
-        if (!matched && i < word.length - 1) {
-            const twoChar = word.slice(i, i + 2);
-            if (englishToShavian[twoChar]) {
-                result += englishToShavian[twoChar];
-                i += 2;
-                matched = true;
-            }
-        }
-        
-        // Try single character
-        if (!matched && englishToShavian[word[i]]) {
-            result += englishToShavian[word[i]];
-            i++;
-            matched = true;
-        }
-        
-        // If no match, skip the character
-        if (!matched) {
-            i++;
-        }
-    }
-    
-    return result;
+// Use only the Python wrapper for all transliteration
+async function transliterateWithPhoneticFallback(text) {
+    return latin2shaw(text);
 }
 
-function transliterateWithPhoneticFallback(text) {
-    // First check contraction mappings (keep these as they're special cases)
-    if (contractionMappings[text]) {
-        return contractionMappings[text];
-    }
-
-    // Minimal override for specific problematic words
-    const minimalOverrides = {
-        'there': '𐑞𐑺',
-        'their': '𐑞𐑺',
-        'new': '𐑯𐑿',
-        'seen': '𐑕𐑰𐑯'
-    };
-    if (minimalOverrides[text.toLowerCase()]) {
-        const result = minimalOverrides[text.toLowerCase()];
-        // Proper noun prefix if needed
-        if (text[0] === text[0].toUpperCase() && text.length > 1) {
-            return '·' + result;
-        }
-        return result;
-    }
-
-    // Try the main transliteration
-    const standardResult = toShavian(text);
-    if (standardResult !== text) {
-        return standardResult;
-    }
-
-    // Otherwise, use the phonetic fallback
-    const phoneticResult = englishToShavianPhonetic(text);
-    if (phoneticResult) {
-        if (text[0] === text[0].toUpperCase() && text.length > 1) {
-            return '·' + phoneticResult;
-        }
-        return phoneticResult;
-    }
-
-    // If all else fails, return the input
-    return text;
-}
-
-function transliterateWithQuotes(text) {
+async function transliterateWithQuotes(text) {
     // First, decode HTML entities
     text = text.replace(/&amp;/g, '&')
                .replace(/&lt;/g, '<')
@@ -204,96 +49,42 @@ function transliterateWithQuotes(text) {
                .replace(/&quot;/g, '"')
                .replace(/&#39;/g, "'")
                .replace(/&apos;/g, "'");
-    
-    // Handle contractions first before any other processing
-    for (const [contraction, shavian] of Object.entries(contractionMappings)) {
-        const regex = new RegExp(`\\b${contraction.replace(/'/g, "\\'")}\\b`, 'gi');
-        text = text.replace(regex, shavian);
-    }
-    
     // Split text into quoted and non-quoted segments
     const segments = [];
     let currentIndex = 0;
     let inQuotes = false;
     let quoteStart = -1;
-    
     for (let i = 0; i < text.length; i++) {
         const char = text[i];
-        
-        if (char === '"' || char === '"' || char === '"') {
+        if (char === '"') {
             if (!inQuotes) {
-                // Start of quote
                 if (i > currentIndex) {
-                    segments.push({
-                        text: text.slice(currentIndex, i),
-                        isQuoted: false
-                    });
+                    segments.push({ text: text.slice(currentIndex, i), isQuoted: false });
                 }
                 quoteStart = i;
                 inQuotes = true;
             } else {
-                // End of quote
-                segments.push({
-                    text: text.slice(quoteStart + 1, i),
-                    isQuoted: true
-                });
+                segments.push({ text: text.slice(quoteStart + 1, i), isQuoted: true });
                 inQuotes = false;
                 currentIndex = i + 1;
             }
         }
     }
-    
-    // Add remaining text
     if (currentIndex < text.length) {
-        segments.push({
-            text: text.slice(currentIndex),
-            isQuoted: false
-        });
+        segments.push({ text: text.slice(currentIndex), isQuoted: false });
     }
-    
-    // Transliterate each segment with phonetic fallback
-    const transliteratedSegments = segments.map(segment => {
-        if (segment.isQuoted) {
-            return `"${transliterateWithPhoneticFallback(segment.text)}"`;
-        } else {
-            // Split non-quoted text into words and transliterate each
-            const words = segment.text.split(/\b/);
-            return words.map(word => {
-                // Handle words with apostrophes (contractions)
-                if (/^[A-Za-z']+$/.test(word)) {
-                    return transliterateWithPhoneticFallback(word);
-                }
-                return word;
-            }).join('');
-        }
-    });
-    
+    // Transliterate each segment
+    const transliteratedSegments = await Promise.all(segments.map(async segment => {
+        return latin2shaw(segment.text);
+    }));
     return transliteratedSegments.join('');
 }
 
-function transliterateHtmlEntities(htmlText) {
-    // First, decode HTML entities to regular apostrophes
+async function transliterateHtmlEntities(htmlText) {
     let result = htmlText
         .replace(/&#39;/g, "'")
         .replace(/&apos;/g, "'");
-    
-    // Helper to check if a string contains any Shavian character
-    function containsShavian(str) {
-        for (let i = 0; i < str.length; i++) {
-            const code = str.charCodeAt(i);
-            if (code >= 0x10450 && code <= 0x1047F) return true;
-        }
-        return false;
-    }
-    
-    // Now apply phonetic transliteration to any remaining English words
-    return result.replace(/\b[A-Za-z']+\b/g, (match) => {
-        // Skip if it's already transliterated or is a contraction
-        if (contractionMappings[match] || containsShavian(match)) {
-            return match;
-        }
-        return transliterateWithPhoneticFallback(match);
-    });
+    return latin2shaw(result);
 }
 
 async function transliterateEpub(inputPath, outputPath, includeOriginal = false) {
@@ -309,9 +100,9 @@ async function transliterateEpub(inputPath, outputPath, includeOriginal = false)
                 log(`📖 Processing ${epub.flow.length} chapters...`, 'blue');
                 for (let i = 0; i < epub.flow.length; i++) {
                     const chapter = epub.flow[i];
-                    logProgress(i + 1, epub.flow.length, `Chapter ${i + 1}: ${chapter.title || chapter.id}`);
+                    renderProgressBar(i + 1, epub.flow.length);
                     await new Promise((res, rej) => {
-                        epub.getChapter(chapter.id, (err, text) => {
+                        epub.getChapter(chapter.id, async (err, text) => {
                             if (err) {
                                 console.error(`Error extracting chapter ${i + 1}:`, err);
                                 return res();
@@ -335,7 +126,7 @@ async function transliterateEpub(inputPath, outputPath, includeOriginal = false)
                             if (textContent.length > 0) {
                                 // Parse the original HTML structure to preserve divs and other elements
                                 const originalHtml = textContent;
-                                const shavianText = transliterateWithQuotes(textContent);
+                                const shavianText = await transliterateWithQuotes(textContent);
                                 
                                 // Extract text content for sentence splitting (remove HTML tags)
                                 const textOnly = textContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -351,7 +142,7 @@ async function transliterateEpub(inputPath, outputPath, includeOriginal = false)
                                 const paragraphPairs = [];
                                 for (let j = 0; j < sentences.length; j++) {
                                     const originalSentence = sentences[j];
-                                    const shavianSentence = transliterateWithQuotes(originalSentence);
+                                    const shavianSentence = await transliterateWithQuotes(originalSentence);
                                     
                                     // Escape HTML for Shavian text
                                     const escaped = escapeHtml(shavianSentence);
@@ -790,27 +581,39 @@ async function main() {
     let successCount = 0;
     let totalCount = epubFiles.length;
     
-    for (let i = 0; i < epubFiles.length; i++) {
-        const success = await processEpubFile(epubFiles[i], includeOriginal);
-        if (success) successCount++;
-        
-        if (i < epubFiles.length - 1) {
-            log('\n' + '─'.repeat(50), 'blue');
+    try {
+        for (let i = 0; i < epubFiles.length; i++) {
+            const success = await processEpubFile(epubFiles[i], includeOriginal);
+            if (success) successCount++;
+            
+            if (i < epubFiles.length - 1) {
+                log('\n' + '─'.repeat(50), 'blue');
+            }
         }
-    }
-    
-    log('\n🎉 Processing Complete!', 'bright');
-    log(`✅ Successfully processed: ${successCount}/${totalCount} files`, 'green');
-    log(`📁 Output files are in the 'output' directory`, 'blue');
-    
-    if (successCount < totalCount) {
-        log(`⚠️  ${totalCount - successCount} file(s) had errors`, 'yellow');
+        
+        log('\n🎉 Processing Complete!', 'bright');
+        log(`✅ Successfully processed: ${successCount}/${totalCount} files`, 'green');
+        log(`📁 Output files are in the 'output' directory`, 'blue');
+        
+        if (successCount < totalCount) {
+            log(`⚠️  ${totalCount - successCount} file(s) had errors`, 'yellow');
+            process.exit(1);
+        }
+    } catch (error) {
+        log(`❌ Error: ${error.message}`, 'red');
         process.exit(1);
+    } finally {
+        try {
+            closePythonProcess();
+        } catch (error) {
+            // Ignore cleanup errors
+        }
     }
 }
 
 // Run the main function
 main().catch(error => {
     log(`❌ Fatal error: ${error.message}`, 'red');
+    closePythonProcess();
     process.exit(1);
 }); 
