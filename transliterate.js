@@ -159,24 +159,40 @@ function transliterateWithPhoneticFallback(text) {
     if (contractionMappings[text]) {
         return contractionMappings[text];
     }
-    
-    // Then try the standard to-shavian transliteration
-    const standardResult = toShavian(text);
-    
-    // If the result is the same as input, it means the word wasn't transliterated
-    if (standardResult === text) {
-        // Use phonetic mapping as fallback
-        const phoneticResult = englishToShavianPhonetic(text);
-        if (phoneticResult) {
-            // Check if it looks like a proper noun (capitalized)
-            if (text[0] === text[0].toUpperCase() && text.length > 1) {
-                return '·' + phoneticResult; // Add proper noun prefix
-            }
-            return phoneticResult;
+
+    // Minimal override for specific problematic words
+    const minimalOverrides = {
+        'there': '𐑞𐑺',
+        'their': '𐑞𐑺',
+        'new': '𐑯𐑿',
+        'seen': '𐑕𐑰𐑯'
+    };
+    if (minimalOverrides[text.toLowerCase()]) {
+        const result = minimalOverrides[text.toLowerCase()];
+        // Proper noun prefix if needed
+        if (text[0] === text[0].toUpperCase() && text.length > 1) {
+            return '·' + result;
         }
+        return result;
     }
-    
-    return standardResult;
+
+    // Try the main transliteration
+    const standardResult = toShavian(text);
+    if (standardResult !== text) {
+        return standardResult;
+    }
+
+    // Otherwise, use the phonetic fallback
+    const phoneticResult = englishToShavianPhonetic(text);
+    if (phoneticResult) {
+        if (text[0] === text[0].toUpperCase() && text.length > 1) {
+            return '·' + phoneticResult;
+        }
+        return phoneticResult;
+    }
+
+    // If all else fails, return the input
+    return text;
 }
 
 function transliterateWithQuotes(text) {
@@ -187,6 +203,12 @@ function transliterateWithQuotes(text) {
                .replace(/&quot;/g, '"')
                .replace(/&#39;/g, "'")
                .replace(/&apos;/g, "'");
+    
+    // Handle contractions first before any other processing
+    for (const [contraction, shavian] of Object.entries(contractionMappings)) {
+        const regex = new RegExp(`\\b${contraction.replace(/'/g, "\\'")}\\b`, 'gi');
+        text = text.replace(regex, shavian);
+    }
     
     // Split text into quoted and non-quoted segments
     const segments = [];
@@ -249,17 +271,10 @@ function transliterateWithQuotes(text) {
 }
 
 function transliterateHtmlEntities(htmlText) {
-    // First handle basic HTML entities
+    // First, decode HTML entities to regular apostrophes
     let result = htmlText
-        .replace(/&#39;ve/g, '𐑝') // you've, I've, we've, they've
-        .replace(/&#39;re/g, '𐑼') // you're, we're, they're
-        .replace(/&#39;ll/g, '𐑤') // you'll, I'll, he'll, she'll, it'll, we'll, they'll
-        .replace(/&#39;d/g, '𐑛') // you'd, I'd, he'd, she'd, it'd, we'd, they'd
-        .replace(/&#39;m/g, '𐑥') // I'm
-        .replace(/&#39;s/g, '𐑟') // he's, she's, it's
-        .replace(/n&#39;t/g, '𐑯𐑑') // don't, doesn't, didn't, won't, can't, etc.
-        .replace(/An&#39;/g, '𐑯') // An'
-        .replace(/an&#39;/g, '𐑯'); // an'
+        .replace(/&#39;/g, "'")
+        .replace(/&apos;/g, "'");
     
     // Helper to check if a string contains any Shavian character
     function containsShavian(str) {
@@ -269,8 +284,9 @@ function transliterateHtmlEntities(htmlText) {
         }
         return false;
     }
+    
     // Now apply phonetic transliteration to any remaining English words
-    return result.replace(/\b[A-Za-z]+\b/g, (match) => {
+    return result.replace(/\b[A-Za-z']+\b/g, (match) => {
         // Skip if it's already transliterated or is a contraction
         if (contractionMappings[match] || containsShavian(match)) {
             return match;
@@ -279,7 +295,7 @@ function transliterateHtmlEntities(htmlText) {
     });
 }
 
-async function transliterateEpub(inputPath, outputPath) {
+async function transliterateEpub(inputPath, outputPath, includeOriginal = false) {
     return new Promise((resolve, reject) => {
         const epub = new EPub(inputPath);
         epub.on('error', (err) => {
@@ -319,14 +335,27 @@ async function transliterateEpub(inputPath, outputPath) {
                                 const shavianText = transliterateWithQuotes(textContent);
                                 
                                 // Split into paragraphs by double newlines or periods (as fallback)
-                                const paragraphs = shavianText.split(/\n\s*\n|(?<=\.) /g)
-                                    .map(p => {
-                                        // First handle HTML entities, then escape HTML
-                                        const withEntities = transliterateHtmlEntities(p.trim());
-                                        const escaped = escapeHtml(withEntities);
-                                        return `<p class=\"calibre3\">${escaped}</p>`;
-                                    })
-                                    .join('\n');
+                                const originalParagraphs = textContent.split(/\n\s*\n|(?<=\.) /g).map(p => p.trim()).filter(p => p.length > 0);
+                                const shavianParagraphs = shavianText.split(/\n\s*\n|(?<=\.) /g).map(p => p.trim()).filter(p => p.length > 0);
+                                
+                                // Create paragraph pairs (Shavian + Original if enabled)
+                                const paragraphPairs = [];
+                                for (let j = 0; j < shavianParagraphs.length; j++) {
+                                    const shavianPara = shavianParagraphs[j];
+                                    const originalPara = j < originalParagraphs.length ? originalParagraphs[j] : '';
+                                    
+                                    // Escape HTML for Shavian text (HTML entities already handled in transliteration)
+                                    const escaped = escapeHtml(shavianPara);
+                                    paragraphPairs.push(`<p class="calibre3">${escaped}</p>`);
+                                    
+                                    // Add original text if enabled and available
+                                    if (includeOriginal && originalPara) {
+                                        const escapedOriginal = escapeHtml(originalPara);
+                                        paragraphPairs.push(`<p class="original-text">${escapedOriginal}</p>`);
+                                    }
+                                }
+                                
+                                const paragraphs = paragraphPairs.join('\n');
                                 
                                 // Generate unique ID for chapter
                                 const chapterId = `chapter-${i + 1}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -402,6 +431,17 @@ async function transliterateEpub(inputPath, outputPath) {
         }
         .calibre6 {
             font-style: italic;
+        }
+        .original-text {
+            display: block;
+            text-align: justify;
+            text-indent: 1em;
+            margin: 0 0 0.5em 2em;
+            font-size: 0.8em;
+            color: #666666;
+            font-style: italic;
+            border-left: 2px solid #cccccc;
+            padding-left: 1em;
         }
     </style>
 </head>
@@ -531,7 +571,7 @@ function extractAllImages(inputFile, callback) {
     });
 }
 
-async function processEpubFile(inputFile) {
+async function processEpubFile(inputFile, includeOriginal = false) {
     const fileName = path.basename(inputFile, '.epub');
     const outputFile = `output/${fileName}-shavian.html`;
     
@@ -555,7 +595,7 @@ async function processEpubFile(inputFile) {
         }
         
         // Process the EPUB
-        await transliterateEpub(inputFile, outputFile);
+        await transliterateEpub(inputFile, outputFile, includeOriginal);
         
         // Convert to EPUB and MOBI with cover
         log('🔄 Converting to EPUB...', 'blue');
@@ -689,6 +729,29 @@ async function main() {
     log('🎯 Shavian Transliteration Tool', 'bright');
     log('================================', 'bright');
     
+    // Show help if requested
+    if (process.argv.includes('--help') || process.argv.includes('-h')) {
+        log('Usage: node transliterate.js [--skip-original]', 'cyan');
+        log('', 'reset');
+        log('Options:', 'bright');
+        log('  --skip-original     Skip original Latin text (Shavian only)', 'cyan');
+        log('  --help, -h          Show this help message', 'cyan');
+        log('', 'reset');
+        log('Examples:', 'bright');
+        log('  node transliterate.js                    # Include original text for learning', 'cyan');
+        log('  node transliterate.js --skip-original    # Shavian only', 'cyan');
+        process.exit(0);
+    }
+    
+    // Parse command line arguments
+    const skipOriginal = process.argv.includes('--skip-original');
+    const includeOriginal = !skipOriginal;
+    if (includeOriginal) {
+        log('📝 Original Latin text will be included after each paragraph', 'cyan');
+    } else {
+        log('📝 Shavian text only (original text skipped)', 'cyan');
+    }
+    
     // Ensure output directory exists
     if (!fs.existsSync('output')) {
         fs.mkdirSync('output');
@@ -719,7 +782,7 @@ async function main() {
     let totalCount = epubFiles.length;
     
     for (let i = 0; i < epubFiles.length; i++) {
-        const success = await processEpubFile(epubFiles[i]);
+        const success = await processEpubFile(epubFiles[i], includeOriginal);
         if (success) successCount++;
         
         if (i < epubFiles.length - 1) {
