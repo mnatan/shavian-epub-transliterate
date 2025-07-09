@@ -188,10 +188,10 @@ async function processEpubFile(inputFile, includeOriginal = false) {
         
         // Convert to EPUB and MOBI with cover
         log('🔄 Converting to EPUB...', 'blue');
-        await convertToEpub(outputFile, `output/${fileName}-shavian.epub`, finalCoverFile);
+        await convertToEpub(outputFile, `output/${fileName}-shavian.epub`, finalCoverFile, EBOOK_CONVERT, log);
         
         log('🔄 Converting to MOBI...', 'blue');
-        await convertToMobi(`output/${fileName}-shavian.epub`, `output/${fileName}-shavian.mobi`, finalCoverFile);
+        await convertToMobi(`output/${fileName}-shavian.epub`, `output/${fileName}-shavian.mobi`, finalCoverFile, EBOOK_CONVERT, log);
         
         log(`✅ Successfully processed: ${path.basename(inputFile)}`, 'green');
         return true;
