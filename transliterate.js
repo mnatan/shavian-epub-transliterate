@@ -39,11 +39,6 @@ function escapeHtml(text) {
                .replace(/'/g, '&#39;');
 }
 
-// Use only the Python wrapper for all transliteration
-async function transliterateWithPhoneticFallback(text) {
-    return latin2shaw(text);
-}
-
 async function transliterateWithQuotes(text) {
     // First, decode HTML entities
     text = text.replace(/&amp;/g, '&')
@@ -82,54 +77,6 @@ async function transliterateWithQuotes(text) {
         return segment.isQuoted ? `"${transliterated}"` : transliterated;
     }));
     return transliteratedSegments.join('');
-}
-
-async function transliterateHtmlEntities(htmlText) {
-    let result = htmlText
-        .replace(/&#39;/g, "'")
-        .replace(/&apos;/g, "'");
-    return latin2shaw(result);
-}
-
-function splitSentencesWithQuotes(text) {
-    // Helper to split quoted content into sentences and re-wrap in quotes
-    function splitQuotedBlock(inner) {
-        // Split on sentence-ending punctuation followed by space or end
-        const sentences = inner.match(/[^.!?]+[.!?]+(?:\s+|$)/g);
-        if (!sentences) return ['"' + inner.trim() + '"'];
-        return sentences.map(s => '"' + s.trim() + '"').filter(s => s.length > 2);
-    }
-
-    const result = [];
-    let cursor = 0;
-    while (cursor < text.length) {
-        const startQuote = text.indexOf('"', cursor);
-        if (startQuote === -1) {
-            // No more quotes, process the rest as non-quoted
-            const nodes = split(text.slice(cursor));
-            result.push(...nodes.filter(node => node.type === 'Sentence').map(node => node.raw.trim()).filter(Boolean));
-            break;
-        }
-        // Process non-quoted prefix
-        if (startQuote > cursor) {
-            const prefix = text.slice(cursor, startQuote);
-            const nodes = split(prefix);
-            result.push(...nodes.filter(node => node.type === 'Sentence').map(node => node.raw.trim()).filter(Boolean));
-        }
-        // Find end quote
-        const endQuote = text.indexOf('"', startQuote + 1);
-        if (endQuote === -1) {
-            // Unmatched quote, treat rest as non-quoted
-            const nodes = split(text.slice(startQuote));
-            result.push(...nodes.filter(node => node.type === 'Sentence').map(node => node.raw.trim()).filter(Boolean));
-            break;
-        }
-        // Process quoted block
-        const quotedInner = text.slice(startQuote + 1, endQuote);
-        result.push(...splitQuotedBlock(quotedInner));
-        cursor = endQuote + 1;
-    }
-    return result.filter(Boolean);
 }
 
 async function transliterateEpub(inputPath, outputPath, includeOriginal = false) {
