@@ -369,6 +369,35 @@ class LatinToShavian:
             elif token.lower_ == "'" and token.tag_ == "POS":
                 text_split_shaw += token.whitespace_
 
+            # Handle tokens with internal apostrophes that aren't in the dictionary (e.g., "G'night")
+            elif "'" in token.text and token.lower_ not in self.readlex_dict:
+                try:
+                    base, contraction = token.text.split("'", 1)
+                    # Try to transliterate base and contraction separately
+                    base_shaw = ""
+                    if base.lower() in self.readlex_dict:
+                        for i in self.readlex_dict.get(base.lower(), []):
+                            if i["tag"] == "0" or i["tag"] == token.tag_:
+                                base_shaw = i["Shaw"]
+                                break
+                    else:
+                        # If base not in dictionary, use phonetic transliteration
+                        base_shaw = self._phonetic_transliterate(base) if base.isalpha() else base
+                    
+                    # Handle the contraction part
+                    contraction_shaw = ""
+                    if contraction.lower() in self.contraction_end:
+                        contraction_shaw = self.contraction_end[contraction.lower()]
+                    else:
+                        # If contraction not recognized, try to transliterate it
+                        contraction_shaw = self._phonetic_transliterate(contraction) if contraction.isalpha() else contraction
+                    
+                    text_split_shaw += base_shaw + contraction_shaw + token.whitespace_
+                    continue
+                except:
+                    # If splitting fails, fall through to phonetic transliteration
+                    pass
+
             # Convert verbs that change pronunciation before 'to', e.g. 'have to', 'used to', 'supposed to'
             elif token.lower_ in self.before_to and token.i < len(doc) - 1 and doc[token.i + 1].lower_ == "to":
                 # 'have' only changes pronunciation where 'have to' means 'must'
