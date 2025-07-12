@@ -48,11 +48,11 @@ class LatinToShavian:
         self.prefixes: dict[str, str] = {
             "anti": "𐑨𐑯𐑑𐑦", "counter": "𐑒𐑬𐑯𐑑𐑼", "de": "𐑛𐑰", "dis": "𐑛𐑦𐑕",
             "esque": "𐑧𐑕𐑒", "hyper": "𐑣𐑲𐑐𐑼", "hypo": "𐑣𐑲𐑐𐑴", "mega": "𐑥𐑧𐑜𐑩",
-            "meta": "𐑥��𐑑𐑩", "micro": "𐑥𐑧𐑒𐑮𐑴", "multi": "𐑳𐑤𐑑𐑦", "mis": "𐑥𐑦𐑕",
+            "meta": "𐑥𐑧𐑑𐑩", "micro": "𐑥𐑧𐑒𐑮𐑴", "multi": "𐑳𐑤𐑑𐑦", "mis": "𐑥𐑦𐑕",
             "neuro": "𐑯𐑘𐑫𐑼𐑴", "non": "𐑯𐑪𐑯", "o'er": "𐑴𐑼", "out": "𐑬𐑑", "over": "𐑴𐑝𐑼",
             "poly": "𐑐𐑪𐑤𐑦", "post": "𐑐𐑴𐑕𐑑", "pre": "𐑐𐑮𐑰", "pro": "𐑐𐑮𐑴",
             "pseudo": "𐑕𐑿𐑛𐑴", "re": "𐑮𐑰", "sub": "𐑕𐑳𐑚", "super": "𐑕𐑵𐑐𐑼",
-            "ultra": "𐑳𐑤𐑑𐑮𐑩", "un": "𐑳��", "under": "𐑳𐑯𐑛𐑼"
+            "ultra": "𐑳𐑤𐑑𐑮𐑩", "un": "𐑳𐑯", "under": "𐑳𐑯𐑛𐑼"
         }
         self.suffixes: dict[str, str] = {
             "able": "𐑩𐑚𐑩𐑤", "bound": "𐑚𐑬𐑯𐑛", "ful": "𐑓𐑩𐑤", "hood": "𐑣𐑫𐑛",
@@ -484,7 +484,8 @@ class LatinToShavian:
                 text_shaw = text_shaw.replace(key, value)
 
         else:
-            text = unidecode.unidecode(text)
+            # Don't use unidecode as it strips Unicode characters including Shavian
+            # text = unidecode.unidecode(text)
             text = re.sub(r"(\S)(\[)", r"\1 \2", text)
             text = re.sub(r"](\S)", r"] \1", text)
             text_split: list[str] = text.splitlines()
