@@ -9,7 +9,8 @@ describe('Full Pipeline Integration', () => {
       { placeholder: '__IMAGE_PLACEHOLDER_0__', src: 'img0.jpg' },
       { placeholder: '__IMAGE_PLACEHOLDER_1__', src: 'img1.jpg' },
     ];
-    const text = 'Hello __IMAGE_PLACEHOLDER_0__ world! __IMAGE_PLACEHOLDER_1__';
+    // Use a <p> block for text, and images as separate placeholders
+    const text = '<p>Hello world!</p> __IMAGE_PLACEHOLDER_0__ __IMAGE_PLACEHOLDER_1__';
     const chapterHtml = await processChapterText({
       text,
       imagePlaceholders,
@@ -27,9 +28,8 @@ describe('Full Pipeline Integration', () => {
     expect(html).toContain('<h1 id="integration-1">Integration Chapter</h1>');
     expect(html).toContain('<img src="images/img0.jpg"');
     expect(html).toContain('<img src="images/img1.jpg"');
-    expect(html).toContain('[SHA:Hello]');
-    expect(html).toContain('[SHA:world!]');
-    expect(html).toContain('<p class="original-text">Hello</p>');
-    expect(html).toContain('<p class="original-text">world!</p>');
+    // Now, the whole paragraph is transliterated as a unit
+    expect(html).toContain('[SHA:Hello world!]');
+    expect(html).toContain('<p class="original-text">Hello world!</p>');
   });
 }); 

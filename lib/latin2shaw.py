@@ -295,7 +295,7 @@ class LatinToShavian:
         prefix = "·" if word[0].isupper() else ""
         
         # Add phonetic warning symbol
-        return prefix + shavian + "🔤"
+        return prefix + shavian + "[p]"
 
     def _initialize_spacy(self):
         """Initialize spaCy model and custom tokenizer."""
@@ -446,7 +446,7 @@ class LatinToShavian:
             # Apply additional tests where there is still no match
             else:
                 found: bool = False
-                constructed_warning: str = "⚠️"
+                constructed_warning: str = "[c]"
                 '''
                 Try to construct a match using common prefixes and suffixes and include a warning symbol to aid proof
                 reading
