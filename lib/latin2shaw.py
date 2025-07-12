@@ -456,6 +456,8 @@ class LatinToShavian:
 
     def convert_text(self, text: str) -> str:
         """Convert Latin text to Shavian script."""
+        # Normalize apostrophes to ASCII
+        text = text.replace("’", "'").replace("‘", "'")
         # Create the string that will contain the Shavianised text.
         text_shaw: str = ""
 
