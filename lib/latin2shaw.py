@@ -9,6 +9,7 @@ from spacy.util import compile_infix_regex, compile_prefix_regex, compile_suffix
 from spacy.tokens import Doc, Span
 from spacy.matcher import PhraseMatcher
 from bs4 import BeautifulSoup
+import eng_to_ipa as ipa
 
 
 class LatinToShavian:
@@ -43,7 +44,7 @@ class LatinToShavian:
         self.prefixes: dict[str, str] = {
             "anti": "𐑨𐑯𐑑𐑦", "counter": "𐑒𐑬𐑯𐑑𐑼", "de": "𐑛𐑰", "dis": "𐑛𐑦𐑕",
             "esque": "𐑧𐑕𐑒", "hyper": "𐑣𐑲𐑐𐑼", "hypo": "𐑣𐑲𐑐𐑴", "mega": "𐑥𐑧𐑜𐑩",
-            "meta": "𐑥𐑧𐑑𐑩", "micro": "𐑥��𐑒𐑮𐑴", "multi": "𐑳𐑤𐑑𐑦", "mis": "𐑥𐑦𐑕",
+            "meta": "𐑥��𐑑𐑩", "micro": "𐑥𐑧𐑒𐑮𐑴", "multi": "𐑳𐑤𐑑𐑦", "mis": "𐑥𐑦𐑕",
             "neuro": "𐑯𐑘𐑫𐑼𐑴", "non": "𐑯𐑪𐑯", "o'er": "𐑴𐑼", "out": "𐑬𐑑", "over": "𐑴𐑝𐑼",
             "poly": "𐑐𐑪𐑤𐑦", "post": "𐑐𐑴𐑕𐑑", "pre": "𐑐𐑮𐑰", "pro": "𐑐𐑮𐑴",
             "pseudo": "𐑕𐑿𐑛𐑴", "re": "𐑮𐑰", "sub": "𐑕𐑳𐑚", "super": "𐑕𐑵𐑐𐑼",
@@ -78,9 +79,10 @@ class LatinToShavian:
         self.ipa_to_shavian = {
             # Vowels
             'i': '𐑦', 'ɪ': '𐑦', 'iː': '𐑰', 'e': '𐑧', 'eɪ': '𐑱', 'ɛ': '𐑧', 'æ': '𐑨',
-            'ɑ': '𐑭', 'ɑː': '𐑭', 'ɒ': '𐑪', 'ɔː': '𐑷', 'oʊ': '𐑴', 'ʊ': '𐑫', 'uː': '𐑵',
+            'ɑ': '𐑭', 'ɑː': '𐑭', 'ɒ': '𐑪', 'ɔ': '𐑪', 'ɔː': '𐑷', 'oʊ': '𐑴', 'ʊ': '𐑫', 'u': '𐑵', 'uː': '𐑵',
             'ʌ': '𐑳', 'ɜː': '𐑻', 'ə': '𐑩', 'ɚ': '𐑼', 'aɪ': '𐑲', 'aʊ': '𐑬', 'ɔɪ': '𐑶',
             'ɪə': '𐑽', 'eə': '𐑺', 'ʊə': '𐑻',
+            'a': '𐑨', 'o': '𐑪',  # Additional vowel mappings
             
             # Consonants
             'p': '𐑐', 'b': '𐑚', 't': '𐑑', 'd': '𐑛', 'k': '𐑒', 'g': '𐑜', 'f': '𐑓',
@@ -91,6 +93,13 @@ class LatinToShavian:
             # Additional mappings for common variations
             'x': '𐑒',  # Scottish 'ch' as in 'loch'
             'ʔ': '',    # Glottal stop (often silent)
+            'y': '𐑘',  # Consonant 'y' as in 'yes'
+            '*': '',    # eng_to_ipa failure marker
+            'q': '𐑒',  # 'q' as in 'queen'
+            'c': '𐑒',  # 'c' as in 'cat'
+            'ʤ': '𐑡',  # 'j' as in 'jam'
+            'ʧ': '𐑗',  # 'ch' as in 'chair'
+            'ʓ': '𐑠',  # 'zh' as in 'vision'
         }
         
         # Common English letter combinations to IPA patterns
@@ -123,139 +132,22 @@ class LatinToShavian:
             'z': ['z'],
         }
         
+    def _clean_ipa(self, ipa_str: str) -> str:
+        """Remove non-Shavian IPA characters like stress marks."""
+        # Remove stress marks and other IPA symbols that don't have Shavian equivalents
+        cleaned = re.sub(r'[ˈˌˈˌ]', '', ipa_str)  # Remove stress marks
+        cleaned = re.sub(r'[ː]', '', cleaned)      # Remove length marks (handled contextually)
+        return cleaned
+
     def _get_ipa_from_text(self, word: str) -> str:
-        """Convert English text to IPA using phonetic rules."""
-        word = word.lower()
-        ipa = ""
-        i = 0
+        """Convert English text to IPA using eng_to_ipa, fallback to old rules if needed."""
+        ipa_str = ipa.convert(word)
+        # If eng_to_ipa returns the word with a '*' suffix, it means it couldn't convert it
+        # In this case, return the original word unchanged
+        if ipa_str.endswith('*'):
+            return word
+        return self._clean_ipa(ipa_str)
         
-        while i < len(word):
-            char = word[i]
-            
-            # Handle common trigraphs first
-            if i < len(word) - 2:
-                trigraph = word[i:i+3]
-                if trigraph in ['tch', 'dge']:
-                    if trigraph == 'tch':
-                        ipa += 'tʃ'
-                    elif trigraph == 'dge':
-                        ipa += 'dʒ'
-                    i += 3
-                    continue
-            
-            # Handle common digraphs
-            if i < len(word) - 1:
-                digraph = word[i:i+2]
-                if digraph in ['th', 'ch', 'sh', 'ph', 'wh', 'qu', 'ng', 'ck', 'gh']:
-                    if digraph == 'th':
-                        # Context-dependent: voiced in function words, unvoiced in content words
-                        if word in ['the', 'this', 'that', 'these', 'those', 'they', 'them', 'their']:
-                            ipa += 'ð'
-                        else:
-                            ipa += 'θ'
-                    elif digraph == 'ch':
-                        ipa += 'tʃ'
-                    elif digraph == 'sh':
-                        ipa += 'ʃ'
-                    elif digraph == 'ph':
-                        ipa += 'f'
-                    elif digraph == 'wh':
-                        ipa += 'w'
-                    elif digraph == 'qu':
-                        ipa += 'kw'
-                    elif digraph == 'ng':
-                        ipa += 'ŋ'
-                    elif digraph == 'ck':
-                        ipa += 'k'
-                    elif digraph == 'gh':
-                        # 'gh' is often silent or 'f' in some words
-                        if i > 0 and word[i-1] in ['au', 'ou']:
-                            ipa += 'f'
-                        else:
-                            # Silent in most cases
-                            pass
-                    i += 2
-                    continue
-            
-            # Handle single characters with context
-            if char == 'c':
-                # 'c' before 'e', 'i', 'y' is 's', otherwise 'k'
-                if i < len(word) - 1 and word[i+1] in ['e', 'i', 'y']:
-                    ipa += 's'
-                else:
-                    ipa += 'k'
-            elif char == 'g':
-                # 'g' before 'e', 'i', 'y' is 'dʒ', otherwise 'g'
-                if i < len(word) - 1 and word[i+1] in ['e', 'i', 'y']:
-                    ipa += 'dʒ'
-                else:
-                    ipa += 'g'
-            elif char == 's':
-                # 's' between vowels is often 'z'
-                if i > 0 and i < len(word) - 1 and word[i-1] in 'aeiou' and word[i+1] in 'aeiou':
-                    ipa += 'z'
-                else:
-                    ipa += 's'
-            elif char in 'aeiou':
-                # Handle vowels with context
-                if char == 'a':
-                    # 'a' patterns: cat, face, father, about
-                    if i < len(word) - 1 and word[i+1] == 'e' and (i == len(word) - 2 or word[i+2] not in 'aeiou'):
-                        ipa += 'eɪ'  # face
-                    elif i < len(word) - 1 and word[i+1] in 'r':
-                        ipa += 'ɑː'  # father
-                    else:
-                        ipa += 'æ'   # cat
-                elif char == 'e':
-                    # 'e' patterns: bed, me, pretty
-                    if i == len(word) - 1:
-                        ipa += 'iː'  # me (final e)
-                    elif i < len(word) - 1 and word[i+1] in 'aeiou':
-                        ipa += 'iː'  # me
-                    else:
-                        ipa += 'e'   # bed
-                elif char == 'i':
-                    # 'i' patterns: bit, bite, machine
-                    if i < len(word) - 1 and word[i+1] == 'e' and (i == len(word) - 2 or word[i+2] not in 'aeiou'):
-                        ipa += 'aɪ'  # bite
-                    elif i == len(word) - 1:
-                        ipa += 'iː'  # machine (final i)
-                    else:
-                        ipa += 'ɪ'   # bit
-                elif char == 'o':
-                    # 'o' patterns: lot, go, love
-                    if i < len(word) - 1 and word[i+1] == 'e' and (i == len(word) - 2 or word[i+2] not in 'aeiou'):
-                        ipa += 'oʊ'  # go
-                    elif i < len(word) - 1 and word[i+1] in 'u':
-                        ipa += 'ʌ'   # love
-                    else:
-                        ipa += 'ɒ'   # lot
-                elif char == 'u':
-                    # 'u' patterns: put, cute, rule
-                    if i < len(word) - 1 and word[i+1] == 'e' and (i == len(word) - 2 or word[i+2] not in 'aeiou'):
-                        ipa += 'juː' # cute
-                    elif i < len(word) - 1 and word[i+1] in 'r':
-                        ipa += 'uː'  # rule
-                    else:
-                        ipa += 'ʊ'   # put
-            elif char == 'y':
-                # 'y' patterns: yes, my, happy
-                if i == 0 or (i > 0 and word[i-1] not in 'aeiou'):
-                    ipa += 'j'   # yes (consonant)
-                elif i == len(word) - 1:
-                    ipa += 'iː'  # happy (final y)
-                else:
-                    ipa += 'ɪ'   # myth
-            elif char in self.letter_to_ipa_patterns:
-                # Use the first pattern as default
-                ipa += self.letter_to_ipa_patterns[char][0]
-            else:
-                # Keep unknown characters as-is
-                ipa += char
-            
-            i += 1
-        
-        return ipa
     
     def _ipa_to_shavian(self, ipa: str) -> str:
         """Convert IPA to Shavian script."""
@@ -287,6 +179,11 @@ class LatinToShavian:
         """Convert a word to Shavian using phonetic rules."""
         # Convert to IPA first
         ipa = self._get_ipa_from_text(word)
+        
+        # If the IPA is the same as the original word, eng_to_ipa couldn't convert it
+        # Return the original word unchanged
+        if ipa == word:
+            return word
         
         # Convert IPA to Shavian
         shavian = self._ipa_to_shavian(ipa)
