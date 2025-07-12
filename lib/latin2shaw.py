@@ -10,6 +10,7 @@ from spacy.tokens import Doc, Span
 from spacy.matcher import PhraseMatcher
 from bs4 import BeautifulSoup
 import eng_to_ipa as ipa
+import subprocess
 
 
 class LatinToShavian:
@@ -24,6 +25,9 @@ class LatinToShavian:
         with open(self.readlex_path, 'r', encoding="utf-8") as file:
             json_data = file.read()
         self.readlex_dict: dict[str, list[dict[str, str]]] = json.loads(json_data)
+
+        # In-memory cache for IPA conversions
+        self.ipa_cache = {}
 
         # Categories of letters that determine how a following 's is pronounced
         self.s_follows: set[str] = {"𐑐", "𐑑", "𐑒", "𐑓", "𐑔"}
@@ -48,7 +52,7 @@ class LatinToShavian:
             "neuro": "𐑯𐑘𐑫𐑼𐑴", "non": "𐑯𐑪𐑯", "o'er": "𐑴𐑼", "out": "𐑬𐑑", "over": "𐑴𐑝𐑼",
             "poly": "𐑐𐑪𐑤𐑦", "post": "𐑐𐑴𐑕𐑑", "pre": "𐑐𐑮𐑰", "pro": "𐑐𐑮𐑴",
             "pseudo": "𐑕𐑿𐑛𐑴", "re": "𐑮𐑰", "sub": "𐑕𐑳𐑚", "super": "𐑕𐑵𐑐𐑼",
-            "ultra": "𐑳𐑤𐑑𐑮𐑩", "un": "𐑳𐑯", "under": "𐑳𐑯𐑛𐑼"
+            "ultra": "𐑳𐑤𐑑𐑮𐑩", "un": "𐑳��", "under": "𐑳𐑯𐑛𐑼"
         }
         self.suffixes: dict[str, str] = {
             "able": "𐑩𐑚𐑩𐑤", "bound": "𐑚𐑬𐑯𐑛", "ful": "𐑓𐑩𐑤", "hood": "𐑣𐑫𐑛",
@@ -80,14 +84,14 @@ class LatinToShavian:
             # Vowels
             'i': '𐑦', 'ɪ': '𐑦', 'iː': '𐑰', 'e': '𐑧', 'eɪ': '𐑱', 'ɛ': '𐑧', 'æ': '𐑨',
             'ɑ': '𐑭', 'ɑː': '𐑭', 'ɒ': '𐑪', 'ɔ': '𐑪', 'ɔː': '𐑷', 'oʊ': '𐑴', 'ʊ': '𐑫', 'u': '𐑵', 'uː': '𐑵',
-            'ʌ': '𐑳', 'ɜː': '𐑻', 'ə': '𐑩', 'ɚ': '𐑼', 'aɪ': '𐑲', 'aʊ': '𐑬', 'ɔɪ': '𐑶',
+            'ʌ': '𐑳', 'ɜː': '𐑻', 'ɜ': '𐑻', 'ə': '𐑩', 'ɚ': '𐑼', 'aɪ': '𐑲', 'aʊ': '𐑬', 'ɔɪ': '𐑶',
             'ɪə': '𐑽', 'eə': '𐑺', 'ʊə': '𐑻',
             'a': '𐑨', 'o': '𐑪',  # Additional vowel mappings
             
             # Consonants
             'p': '𐑐', 'b': '𐑚', 't': '𐑑', 'd': '𐑛', 'k': '𐑒', 'g': '𐑜', 'f': '𐑓',
             'v': '𐑝', 'θ': '𐑔', 'ð': '𐑞', 's': '𐑕', 'z': '𐑟', 'ʃ': '𐑖', 'ʒ': '𐑠',
-            'tʃ': '𐑗', 'dʒ': '𐑡', 'm': '𐑥', 'n': '𐑯', 'ŋ': '𐑙', 'l': '𐑤', 'r': '𐑮',
+            'tʃ': '𐑗', 'dʒ': '𐑡', 'm': '𐑥', 'n': '𐑯', 'ŋ': '𐑙', 'l': '𐑤', 'L': '𐑤', 'r': '𐑮',
             'w': '𐑢', 'j': '𐑘', 'h': '𐑣',
             
             # Additional mappings for common variations
@@ -100,6 +104,7 @@ class LatinToShavian:
             'ʤ': '𐑡',  # 'j' as in 'jam'
             'ʧ': '𐑗',  # 'ch' as in 'chair'
             'ʓ': '𐑠',  # 'zh' as in 'vision'
+            ':': '',    # Length marker (remove)
         }
         
         # Common English letter combinations to IPA patterns
@@ -139,14 +144,74 @@ class LatinToShavian:
         cleaned = re.sub(r'[ː]', '', cleaned)      # Remove length marks (handled contextually)
         return cleaned
 
+    def _espeak_to_ipa(self, word: str) -> str:
+        """Convert word to IPA using espeak."""
+        try:
+            result = subprocess.run(['espeak', '-q', '-x', word], 
+                                  capture_output=True, text=True, check=True)
+            espeak_ipa = result.stdout.strip()
+            return self._convert_espeak_to_standard_ipa(espeak_ipa)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return word  # Return original word if espeak fails
+    
+    def _convert_espeak_to_standard_ipa(self, espeak_ipa: str) -> str:
+        """Convert espeak IPA format to standard IPA."""
+        # espeak uses different symbols, convert them to standard IPA
+        conversion_map = {
+            'A': 'ɑ', 'a': 'æ', 'E': 'ɛ', 'e': 'e', 'I': 'ɪ', 'i': 'i',
+            'O': 'ɔ', 'o': 'o', 'U': 'ʊ', 'u': 'u', '@': 'ə', '3': 'ɜ',
+            'V': 'ʌ', 'N': 'ŋ', 'S': 'ʃ', 'Z': 'ʒ', 'T': 'θ', 'D': 'ð',
+            'tS': 'tʃ', 'dZ': 'dʒ', 'j': 'j', 'w': 'w', 'h': 'h',
+            'p': 'p', 'b': 'b', 't': 't', 'd': 'd', 'k': 'k', 'g': 'g',
+            'f': 'f', 'v': 'v', 's': 's', 'z': 'z', 'm': 'm', 'n': 'n',
+            'l': 'l', 'r': 'r'
+        }
+        
+        # Handle stress marks
+        espeak_ipa = re.sub(r"'", '', espeak_ipa)  # Remove primary stress
+        espeak_ipa = re.sub(r',', '', espeak_ipa)  # Remove secondary stress
+        
+        # Convert characters
+        result = ""
+        i = 0
+        while i < len(espeak_ipa):
+            # Try digraphs first
+            if i < len(espeak_ipa) - 1:
+                digraph = espeak_ipa[i:i+2]
+                if digraph in conversion_map:
+                    result += conversion_map[digraph]
+                    i += 2
+                    continue
+            
+            # Try single characters
+            char = espeak_ipa[i]
+            if char in conversion_map:
+                result += conversion_map[char]
+            else:
+                result += char  # Keep unknown characters
+            
+            i += 1
+        
+        return result
+
     def _get_ipa_from_text(self, word: str) -> str:
-        """Convert English text to IPA using eng_to_ipa, fallback to old rules if needed."""
+        """Convert English text to IPA using eng_to_ipa, fallback to espeak if needed."""
+        if word in self.ipa_cache:
+            return self.ipa_cache[word]
+
         ipa_str = ipa.convert(word)
         # If eng_to_ipa returns the word with a '*' suffix, it means it couldn't convert it
-        # In this case, return the original word unchanged
+        # In this case, try espeak as a fallback
         if ipa_str.endswith('*'):
-            return word
-        return self._clean_ipa(ipa_str)
+            espeak_result = self._espeak_to_ipa(word)
+            if espeak_result != word:  # espeak succeeded
+                self.ipa_cache[word] = self._clean_ipa(espeak_result)
+                return self.ipa_cache[word]
+            else:  # espeak also failed, return original word
+                self.ipa_cache[word] = word
+                return self.ipa_cache[word]
+        self.ipa_cache[word] = self._clean_ipa(ipa_str)
+        return self.ipa_cache[word]
         
     
     def _ipa_to_shavian(self, ipa: str) -> str:
@@ -481,7 +546,11 @@ class LatinToShavian:
 def latin2shaw(text):
     """Legacy function for backward compatibility."""
     converter = LatinToShavian()
-    return converter.convert_text(text)
+    try:
+        result = converter.convert_text(text)
+        return result
+    finally:
+        pass # No cache to save
 
 
 if __name__ == "__main__":
@@ -500,15 +569,18 @@ if __name__ == "__main__":
     
     converter = LatinToShavian(args.readlex_path, args.phrases_path)
     
-    if args.stdin_stdout:
-        # Run in stdin/stdout mode
-        converter.run_stdin_stdout_mode()
-    elif args.text:
-        # Convert provided text
-        result = converter.convert_text(args.text)
-        print(result)
-    else:
-        # Read from stdin if no text provided
-        text = sys.stdin.read()
-        result = converter.convert_text(text)
-        print(result)
+    try:
+        if args.stdin_stdout:
+            # Run in stdin/stdout mode
+            converter.run_stdin_stdout_mode()
+        elif args.text:
+            # Convert provided text
+            result = converter.convert_text(args.text)
+            print(result)
+        else:
+            # Read from stdin if no text provided
+            text = sys.stdin.read()
+            result = converter.convert_text(text)
+            print(result)
+    finally:
+        pass # No cache to save
